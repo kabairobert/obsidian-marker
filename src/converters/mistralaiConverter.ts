@@ -6,6 +6,85 @@ import { ConverterSettingDefinition } from '../utils/converterSettingsUtils';
 import { deleteOriginalFile, checkForExistingFiles } from '../utils/fileUtils';
 import { OCRPageObject } from '@mistralai/mistralai/models/components';
 
+const CAVEMAN_SYSTEM_PROMPT_BASE = `You are a text annotation and reformatting assistant.
+You will receive a markdown document produced by OCR. Your task is two-fold:
+1. Rewrite the text portions using the caveman communication style described below (leave code blocks, URLs, file names, and technical identifiers unchanged).
+2. Annotate key concepts inline using the label system described below.
+
+Do NOT add extra headings, preamble, or explanation. Return only the reformatted markdown.
+
+## Caveman Style Rules
+
+Drop: articles (a/an/the), filler words (just/really/basically/actually/simply), pleasantries (sure/certainly/of course/happy to), hedging phrases. Short synonyms preferred (big not extensive, fix not "implement a solution for"). Use arrows (→) for causality (X → Y). Technical terms, code symbols, function names, and API names stay exact.
+
+Pattern: [thing] [action] [reason]. [next step].
+
+## Intensity Levels`;
+
+const CAVEMAN_LEVEL_PROMPTS: Record<string, string> = {
+  lite: `${CAVEMAN_SYSTEM_PROMPT_BASE}
+
+Current level: **lite** — No filler or hedging. Keep articles and full sentences. Professional but tight.`,
+
+  full: `${CAVEMAN_SYSTEM_PROMPT_BASE}
+
+Current level: **full** — Drop articles, fragments OK, short synonyms, arrows for causality (→). Classic caveman.`,
+
+  ultra: `${CAVEMAN_SYSTEM_PROMPT_BASE}
+
+Current level: **ultra** — Abbreviate prose words (DB/auth/config/req/res/fn/impl), strip conjunctions, arrows for causality (→), one word when one word enough. Code symbols, function names, API names, error strings: never abbreviate.`,
+};
+
+const ANNOTATION_LABELS_PROMPT = `
+## Annotation Label System
+
+Prepend labels to sentences/paragraphs that match the trigger keywords. Format depends on intensity level:
+- lite:  [emoji]**[Word]:** (full word, bold)
+- full:  [emoji]**[Abbr]:** (abbreviated, bold)
+- ultra: [emoji][Abbr]: (no bold)
+
+Labels, abbreviations, and trigger keywords:
+❓Q(uestion): question/ask/unclear
+🔓OpenQ: open question/unsolved/future work
+✅Ans(wer): answered/resolved
+📣Claim: claim/assert/authors say
+🔭Hyp(othesis): hypothesis/predict/conjecture
+💭Assume: assume/unverified/paper assumes/premise
+📊Result: result/finding/outcome/showed
+🔩Mech(anism): mechanism/how it works/why/underlying
+📐Meth(od): methodology/method/approach/procedure
+🔁Analogy: analogy/maps to/equivalent/like
+🧪Test: test/experiment/ablation/validate
+👍Pro: pro/benefit/advantage/upside
+👎Con: con/downside/drawback/cost
+🧱Lim(itation): limitation/constraint/caveat/cannot
+⚠️Warn(ing): warning/danger/risky/beware
+🚫Not: wrong/incorrect/false/misconception
+⚡Contr(adiction): contradicts/conflicts/inconsistent
+💡Idea: idea/suggest/propose/direction
+🔧Fix: fix/patch/debug/repair
+❗Imp(ortant): important/critical/must/crucial
+🔍Check: verify/unsure/confirm/look up
+🗝️Key: key insight/takeaway/core/essential
+📚Ref: reference/cite/paper/source
+ℹ️Info: info/context/background/fyi/general
+💬Talk: quote/said/mentioned/according to/discussion
+🟢Ok: works/valid/confirmed/acceptable
+🔴NotOk: broken/fails/invalid/rejected
+✍️Write: draft/document/todo-write
+⭐Star: notable/remarkable/highlight/standout
+🤖AI: ai-generated/model/llm/gpt/claude
+🥇Best/🥈2nd/🥉3rd: rankings/top/winner
+🔗Link: url/connect/related to/see also
+⏳Time: duration/deadline/epoch/when
+⚙️Set: config/hyperparameter/param/setting
+✔️Done: complete/finished/closed/resolved
+🎯Goal: goal/objective/aim/purpose/target
+🗄️Data: data/dataset/corpus/benchmark/annotation
+
+Only add labels where content clearly matches a trigger. Do not force-label every sentence.
+`;
+
 export class MistralAIConverter extends BaseConverter {
   async convert(
     app: App,
@@ -86,10 +165,28 @@ export class MistralAIConverter extends BaseConverter {
       }
 
       // Parse OCR results
-      const conversionResult = this.parseOCRResults(
+      let conversionResult = this.parseOCRResults(
         ocrResponse.pages,
         settings.extractContent
       );
+
+      // Post-process with caveman annotation style if configured
+      const annotationStyle = settings.mistralaiAnnotationStyle || 'none';
+      if (
+        conversionResult.success &&
+        conversionResult.markdown &&
+        annotationStyle !== 'none'
+      ) {
+        new Notice(
+          `Applying annotation style (${annotationStyle}) with MistralAI...`,
+          3000
+        );
+        conversionResult = await this.postProcessWithCavemanStyle(
+          client,
+          conversionResult,
+          annotationStyle
+        );
+      }
 
       // Process the conversion result
       await this.processConversionResult(
@@ -145,6 +242,44 @@ export class MistralAIConverter extends BaseConverter {
         }
       }
     }
+  }
+
+  private async postProcessWithCavemanStyle(
+    client: Mistral,
+    conversionResult: ConversionResult,
+    level: string
+  ): Promise<ConversionResult> {
+    try {
+      const systemPrompt =
+        (CAVEMAN_LEVEL_PROMPTS[level] || CAVEMAN_LEVEL_PROMPTS['lite']) +
+        ANNOTATION_LABELS_PROMPT;
+
+      const response = await client.chat.complete({
+        model: 'mistral-small-latest',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          {
+            role: 'user',
+            content: conversionResult.markdown || '',
+          },
+        ],
+      });
+
+      const processed =
+        response?.choices?.[0]?.message?.content;
+      if (typeof processed === 'string' && processed.trim()) {
+        return {
+          ...conversionResult,
+          markdown: processed,
+        };
+      }
+    } catch (error) {
+      console.error('MistralAI annotation post-processing error:', error);
+      new Notice(
+        `Annotation post-processing failed: ${error.message || 'Unknown error'}. Using original OCR output.`
+      );
+    }
+    return conversionResult;
   }
 
   private parseOCRResults(
@@ -295,6 +430,20 @@ export class MistralAIConverter extends BaseConverter {
         description: 'Add horizontal rules between each page',
         type: 'toggle',
         defaultValue: false,
+      },
+      {
+        id: 'mistralaiAnnotationStyle',
+        name: 'Annotation style',
+        description:
+          'Post-process extracted text with caveman compression and annotation labels using the MistralAI chat API. "None" keeps the original OCR output.',
+        type: 'dropdown',
+        defaultValue: 'none',
+        options: [
+          { value: 'none', label: 'None (keep original)' },
+          { value: 'lite', label: 'Lite – no filler, full sentences' },
+          { value: 'full', label: 'Full – fragments, arrows, short synonyms' },
+          { value: 'ultra', label: 'Ultra – maximum compression' },
+        ],
       },
     ];
   }

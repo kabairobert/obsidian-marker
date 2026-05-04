@@ -27,6 +27,7 @@ export interface MarkerSettings {
   imageLimit?: number;
   imageMinSize?: number; // Minimum height and width of images to extract
   deleteFileFromMistralaiAfterConversion?: boolean;
+  mistralaiAnnotationStyle?: string; // Caveman annotation style: none | lite | full | ultra
 }
 
 export const DEFAULT_SETTINGS: MarkerSettings = {
@@ -53,6 +54,7 @@ export const DEFAULT_SETTINGS: MarkerSettings = {
   imageLimit: 0,
   imageMinSize: 0, // Default to 0 (no minimum size)
   deleteFileFromMistralaiAfterConversion: false,
+  mistralaiAnnotationStyle: 'none',
 };
 
 export class MarkerSettingTab extends PluginSettingTab {
