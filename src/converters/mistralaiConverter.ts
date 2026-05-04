@@ -87,6 +87,27 @@ Labels, abbreviations, and trigger keywords:
 Only add labels where content clearly matches a trigger. Do not force-label every sentence.
 `;
 
+// All known annotation label words and abbreviations, sorted longest-first so
+// regex alternation is greedy (e.g. "OpenQ" matches before "Q").
+const ANNOTATION_LABEL_WORDS = [
+  'Question', 'OpenQ', 'Answer', 'Claim', 'Hypothesis', 'Assume', 'Result',
+  'Mechanism', 'Method', 'Analogy', 'Test', 'Pro', 'Con', 'Limitation',
+  'Warning', 'Not', 'Contradiction', 'Idea', 'Fix', 'Important', 'Check',
+  'Key', 'Ref', 'Info', 'Talk', 'Ok', 'NotOk', 'Write', 'Star', 'AI',
+  'Best', '2nd', '3rd', 'Link', 'Time', 'Set', 'Done', 'Goal', 'Data',
+  // abbreviations used by full / ultra
+  'Q', 'Ans', 'Clm', 'Hyp', 'Mech', 'Meth', 'Lim', 'Warn', 'Contr', 'Imp',
+].sort((a, b) => b.length - a.length);
+
+// Pre-compiled regex for annotation label normalisation.
+// Matches: EMOJI + optional variation selector + optional whitespace +
+//          optional ** + LABEL + : + optional **
+// e.g. "📣**Clm:**", "📣Clm:", "⚠️ **Warn:**"
+const ANNOTATION_LABEL_PATTERN = new RegExp(
+  `([^\\u0000-\\u007F]\\uFE0F?)\\s*\\*{0,2}(${ANNOTATION_LABEL_WORDS.join('|')}):\\*{0,2}`,
+  'gu'
+);
+
 export class MistralAIConverter extends BaseConverter {
   async convert(
     app: App,
@@ -320,8 +341,15 @@ export class MistralAIConverter extends BaseConverter {
         );
       }
 
-      // Reassemble batches with page separator
-      let processed = processedBatches.join(PAGE_SEP);
+      // Reassemble batches with page separator, then normalize bold formatting.
+      // Each batch is an independent LLM call, so the model may apply bold
+      // inconsistently across batches. The regex below is the single source of
+      // truth: it enforces the correct bold style for the selected level on
+      // every annotation label, regardless of what the LLM decided to do.
+      let processed = this.normalizeAnnotationBold(
+        processedBatches.join(PAGE_SEP),
+        level
+      );
 
       // --- Restore image sentinels → original tags ---
       processed = processed.replace(/__IMG_(\d+)__/g, (_, idx) => {
@@ -340,6 +368,29 @@ export class MistralAIConverter extends BaseConverter {
       );
     }
     return conversionResult;
+  }
+
+  /**
+   * Deterministically normalize annotation label bold formatting.
+   *
+   * Each batch is processed by an independent LLM call, so the model may
+   * apply (or omit) `**bold**` inconsistently across batches.  This method
+   * is the single source of truth: it scans for every known annotation label
+   * following an emoji and enforces the style required by `level`:
+   *   lite / full  →  emoji**Label:**
+   *   ultra        →  emojiLabel:
+   */
+  private normalizeAnnotationBold(text: string, level: string): string {
+    // Use the pre-compiled pattern; reset lastIndex before each use because
+    // the global flag keeps state between calls.
+    ANNOTATION_LABEL_PATTERN.lastIndex = 0;
+    if (level === 'ultra') {
+      // ultra: no bold
+      return text.replace(ANNOTATION_LABEL_PATTERN, '$1$2:');
+    }
+    // lite / full: enforce bold immediately after emoji, no space
+    ANNOTATION_LABEL_PATTERN.lastIndex = 0;
+    return text.replace(ANNOTATION_LABEL_PATTERN, '$1**$2:**');
   }
 
   private parseOCRResults(
