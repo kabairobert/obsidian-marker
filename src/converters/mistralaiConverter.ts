@@ -21,51 +21,134 @@ Pattern: [thing] [action] [reason]. [next step].
 
 ## Intensity Levels`;
 
-const CAVEMAN_LEVEL_PROMPTS: Record<string, string> = {
-  lite: `${CAVEMAN_SYSTEM_PROMPT_BASE}
+// Per-level annotation label prompts.
+// Each prompt describes exactly the format used by that level so the model
+// sees an unambiguous single-format instruction rather than a conditional
+// table listing all three formats.
 
-Current level: **lite** — No filler or hedging. Keep articles and full sentences. Professional but tight.`,
-
-  full: `${CAVEMAN_SYSTEM_PROMPT_BASE}
-
-Current level: **full** — Drop articles, fragments OK, short synonyms, arrows for causality (→). Classic caveman.`,
-
-  ultra: `${CAVEMAN_SYSTEM_PROMPT_BASE}
-
-Current level: **ultra** — Abbreviate prose words (DB/auth/config/req/res/fn/impl), strip conjunctions, arrows for causality (→), one word when one word enough. Code symbols, function names, API names, error strings: never abbreviate.`,
-};
-
-const ANNOTATION_LABELS_PROMPT = `
+const ANNOTATION_LABELS_PROMPT_LITE = `
 ## Annotation Label System
 
-Prepend labels to sentences/paragraphs that match the trigger keywords. Format depends on intensity level:
-- lite:  [emoji]**[Word]:** (full word, bold) — e.g. 📣**Claim:** or ✅**Answer:**
-- full:  [emoji]**[Abbr]:** (abbreviated, bold) — e.g. 📣**Clm:** or ✅**Ans:**
-- ultra: [emoji][Abbr]: (no bold) — e.g. 📣Clm: or ✅Ans:
+Prepend a label to any sentence or paragraph that clearly matches a trigger keyword.
+Format: [emoji]**[FullWord]:** — full word, bold. The ** must appear immediately after the emoji and immediately after the colon: [emoji]**[FullWord]:**
 
-The opening ** must appear immediately after the emoji and the closing ** must appear immediately after the colon, like this: [emoji]**[Word/Abbr]:**
+Labels and trigger keywords:
+❓**Question:** question/ask/unclear
+🔓**OpenQ:** open question/unsolved/future work
+✅**Answer:** answered/resolved
+📣**Claim:** claim/assert/authors say
+🔭**Hypothesis:** hypothesis/predict/conjecture
+💭**Assume:** assume/unverified/paper assumes/premise
+📊**Result:** result/finding/outcome/showed
+🔩**Mechanism:** mechanism/how it works/why/underlying
+📐**Method:** methodology/method/approach/procedure
+🔁**Analogy:** analogy/maps to/equivalent/like
+🧪**Test:** test/experiment/ablation/validate
+👍**Pro:** pro/benefit/advantage/upside
+👎**Con:** con/downside/drawback/cost
+🧱**Limitation:** limitation/constraint/caveat/cannot
+⚠️**Warning:** warning/danger/risky/beware
+🚫**Not:** wrong/incorrect/false/misconception
+⚡**Contradiction:** contradicts/conflicts/inconsistent
+💡**Idea:** idea/suggest/propose/direction
+🔧**Fix:** fix/patch/debug/repair
+❗**Important:** important/critical/must/crucial
+🔍**Check:** verify/unsure/confirm/look up
+🗝️**Key:** key insight/takeaway/core/essential
+📚**Ref:** reference/cite/paper/source
+ℹ️**Info:** info/context/background/fyi/general
+💬**Talk:** quote/said/mentioned/according to/discussion
+🟢**Ok:** works/valid/confirmed/acceptable
+🔴**NotOk:** broken/fails/invalid/rejected
+✍️**Write:** draft/document/todo-write
+⭐**Star:** notable/remarkable/highlight/standout
+🤖**AI:** ai-generated/model/llm/gpt/claude
+🥇**Best:** / 🥈**2nd:** / 🥉**3rd:** rankings/top/winner
+🔗**Link:** url/connect/related to/see also
+⏳**Time:** duration/deadline/epoch/when
+⚙️**Set:** config/hyperparameter/param/setting
+✔️**Done:** complete/finished/closed/resolved
+🎯**Goal:** goal/objective/aim/purpose/target
+🗄️**Data:** data/dataset/corpus/benchmark/annotation
 
-Labels, abbreviations, and trigger keywords:
-❓Q(uestion): question/ask/unclear
+Only add labels where content clearly matches a trigger. Do not force-label every sentence.
+`;
+
+const ANNOTATION_LABELS_PROMPT_FULL = `
+## Annotation Label System
+
+Prepend a label to any sentence or paragraph that clearly matches a trigger keyword.
+Format: [emoji]**[Abbr]:** — abbreviated, bold. The ** must appear immediately after the emoji and immediately after the colon: [emoji]**[Abbr]:**
+
+Labels (abbreviation → trigger keywords):
+❓**Q:** question/ask/unclear
+🔓**OpenQ:** open question/unsolved/future work
+✅**Ans:** answered/resolved
+📣**Clm:** claim/assert/authors say
+🔭**Hyp:** hypothesis/predict/conjecture
+💭**Assume:** assume/unverified/paper assumes/premise
+📊**Result:** result/finding/outcome/showed
+🔩**Mech:** mechanism/how it works/why/underlying
+📐**Meth:** methodology/method/approach/procedure
+🔁**Analogy:** analogy/maps to/equivalent/like
+🧪**Test:** test/experiment/ablation/validate
+👍**Pro:** pro/benefit/advantage/upside
+👎**Con:** con/downside/drawback/cost
+🧱**Lim:** limitation/constraint/caveat/cannot
+⚠️**Warn:** warning/danger/risky/beware
+🚫**Not:** wrong/incorrect/false/misconception
+⚡**Contr:** contradicts/conflicts/inconsistent
+💡**Idea:** idea/suggest/propose/direction
+🔧**Fix:** fix/patch/debug/repair
+❗**Imp:** important/critical/must/crucial
+🔍**Check:** verify/unsure/confirm/look up
+🗝️**Key:** key insight/takeaway/core/essential
+📚**Ref:** reference/cite/paper/source
+ℹ️**Info:** info/context/background/fyi/general
+💬**Talk:** quote/said/mentioned/according to/discussion
+🟢**Ok:** works/valid/confirmed/acceptable
+🔴**NotOk:** broken/fails/invalid/rejected
+✍️**Write:** draft/document/todo-write
+⭐**Star:** notable/remarkable/highlight/standout
+🤖**AI:** ai-generated/model/llm/gpt/claude
+🥇**Best:** / 🥈**2nd:** / 🥉**3rd:** rankings/top/winner
+🔗**Link:** url/connect/related to/see also
+⏳**Time:** duration/deadline/epoch/when
+⚙️**Set:** config/hyperparameter/param/setting
+✔️**Done:** complete/finished/closed/resolved
+🎯**Goal:** goal/objective/aim/purpose/target
+🗄️**Data:** data/dataset/corpus/benchmark/annotation
+
+Only add labels where content clearly matches a trigger. Do not force-label every sentence.
+`;
+
+const ANNOTATION_LABELS_PROMPT_ULTRA = `
+## Annotation Label System
+
+Prepend a label to any sentence or paragraph that clearly matches a trigger keyword.
+Format: [emoji][Abbr]: — abbreviated, no bold, no space between emoji and label.
+
+Labels (abbreviation → trigger keywords):
+❓Q: question/ask/unclear
 🔓OpenQ: open question/unsolved/future work
-✅Ans(wer): answered/resolved
-📣Claim: claim/assert/authors say
-🔭Hyp(othesis): hypothesis/predict/conjecture
+✅Ans: answered/resolved
+📣Clm: claim/assert/authors say
+🔭Hyp: hypothesis/predict/conjecture
 💭Assume: assume/unverified/paper assumes/premise
 📊Result: result/finding/outcome/showed
-🔩Mech(anism): mechanism/how it works/why/underlying
-📐Meth(od): methodology/method/approach/procedure
+🔩Mech: mechanism/how it works/why/underlying
+📐Meth: methodology/method/approach/procedure
 🔁Analogy: analogy/maps to/equivalent/like
 🧪Test: test/experiment/ablation/validate
 👍Pro: pro/benefit/advantage/upside
 👎Con: con/downside/drawback/cost
-🧱Lim(itation): limitation/constraint/caveat/cannot
-⚠️Warn(ing): warning/danger/risky/beware
+🧱Lim: limitation/constraint/caveat/cannot
+⚠️Warn: warning/danger/risky/beware
 🚫Not: wrong/incorrect/false/misconception
-⚡Contr(adiction): contradicts/conflicts/inconsistent
+⚡Contr: contradicts/conflicts/inconsistent
 💡Idea: idea/suggest/propose/direction
 🔧Fix: fix/patch/debug/repair
-❗Imp(ortant): important/critical/must/crucial
+❗Imp: important/critical/must/crucial
 🔍Check: verify/unsure/confirm/look up
 🗝️Key: key insight/takeaway/core/essential
 📚Ref: reference/cite/paper/source
@@ -76,7 +159,7 @@ Labels, abbreviations, and trigger keywords:
 ✍️Write: draft/document/todo-write
 ⭐Star: notable/remarkable/highlight/standout
 🤖AI: ai-generated/model/llm/gpt/claude
-🥇Best/🥈2nd/🥉3rd: rankings/top/winner
+🥇Best: / 🥈2nd: / 🥉3rd: rankings/top/winner
 🔗Link: url/connect/related to/see also
 ⏳Time: duration/deadline/epoch/when
 ⚙️Set: config/hyperparameter/param/setting
@@ -86,6 +169,23 @@ Labels, abbreviations, and trigger keywords:
 
 Only add labels where content clearly matches a trigger. Do not force-label every sentence.
 `;
+
+const CAVEMAN_LEVEL_PROMPTS: Record<string, string> = {
+  lite: `${CAVEMAN_SYSTEM_PROMPT_BASE}
+
+Current level: **lite** — No filler or hedging. Keep articles and full sentences. Professional but tight.
+${ANNOTATION_LABELS_PROMPT_LITE}`,
+
+  full: `${CAVEMAN_SYSTEM_PROMPT_BASE}
+
+Current level: **full** — Drop articles, fragments OK, short synonyms, arrows for causality (→). Classic caveman.
+${ANNOTATION_LABELS_PROMPT_FULL}`,
+
+  ultra: `${CAVEMAN_SYSTEM_PROMPT_BASE}
+
+Current level: **ultra** — Abbreviate prose words (DB/auth/config/req/res/fn/impl), strip conjunctions, arrows for causality (→), one word when one word enough. Code symbols, function names, API names, error strings: never abbreviate.
+${ANNOTATION_LABELS_PROMPT_ULTRA}`,
+};
 
 // All known annotation label words and abbreviations, sorted longest-first so
 // regex alternation is greedy (e.g. "OpenQ" matches before "Q").
@@ -275,7 +375,6 @@ export class MistralAIConverter extends BaseConverter {
     try {
       const systemPrompt =
         (CAVEMAN_LEVEL_PROMPTS[level] || CAVEMAN_LEVEL_PROMPTS['lite']) +
-        ANNOTATION_LABELS_PROMPT +
         `\n\nIMPORTANT: The text may contain image placeholder tokens of the form __IMG_0__, __IMG_1__, etc. These are sentinels for embedded images. You MUST reproduce every such token exactly as-is, in its original position, without modification.`;
 
       const markdown = conversionResult.markdown || '';
