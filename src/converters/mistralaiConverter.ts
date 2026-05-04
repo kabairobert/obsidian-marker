@@ -254,27 +254,85 @@ export class MistralAIConverter extends BaseConverter {
     try {
       const systemPrompt =
         (CAVEMAN_LEVEL_PROMPTS[level] || CAVEMAN_LEVEL_PROMPTS['lite']) +
-        ANNOTATION_LABELS_PROMPT;
+        ANNOTATION_LABELS_PROMPT +
+        `\n\nIMPORTANT: The text may contain image placeholder tokens of the form __IMG_0__, __IMG_1__, etc. These are sentinels for embedded images. You MUST reproduce every such token exactly as-is, in its original position, without modification.`;
 
-      const response = await client.chat.complete({
-        model: 'mistral-small-latest',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          {
-            role: 'user',
-            content: conversionResult.markdown || '',
-          },
-        ],
+      const markdown = conversionResult.markdown || '';
+
+      // --- Symptom 1: extract image tags → sentinels ---
+      const imageTokens: string[] = [];
+      const sanitized = markdown.replace(
+        /!\[[^\]]*\]\([^)]*\)/g,
+        (match) => {
+          const idx = imageTokens.length;
+          imageTokens.push(match);
+          return `__IMG_${idx}__`;
+        }
+      );
+
+      // --- Symptom 2: batch pages to stay under ~6 000-token limit ---
+      const PAGE_SEP = '\n\n---\n\n';
+      const TOKEN_BUDGET = 6000;
+      // 4 chars/token is a rough approximation; adjust if content is code-heavy
+      const CHARS_PER_TOKEN = 4;
+      const CHAR_BUDGET = TOKEN_BUDGET * CHARS_PER_TOKEN;
+
+      const pages = sanitized.split(PAGE_SEP);
+      const batches: string[][] = [];
+      let currentBatch: string[] = [];
+      let currentLen = 0;
+
+      for (const page of pages) {
+        if (
+          currentBatch.length > 0 &&
+          currentLen + page.length > CHAR_BUDGET
+        ) {
+          batches.push(currentBatch);
+          currentBatch = [];
+          currentLen = 0;
+        }
+        currentBatch.push(page);
+        currentLen += page.length;
+      }
+      if (currentBatch.length > 0) {
+        batches.push(currentBatch);
+      }
+
+      const processedBatches: string[] = [];
+      for (const batch of batches) {
+        const batchText = batch.join(PAGE_SEP);
+        const response = await client.chat.complete({
+          model: 'mistral-small-latest',
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: batchText },
+          ],
+        });
+
+        const result = response?.choices?.[0]?.message?.content;
+        if (typeof result !== 'string' || !result.trim()) {
+          console.warn(
+            'MistralAI annotation: empty/unexpected response for batch, keeping original text'
+          );
+        }
+        processedBatches.push(
+          typeof result === 'string' && result.trim() ? result : batchText
+        );
+      }
+
+      // Reassemble batches with page separator
+      let processed = processedBatches.join(PAGE_SEP);
+
+      // --- Restore image sentinels → original tags ---
+      processed = processed.replace(/__IMG_(\d+)__/g, (_, idx) => {
+        const original = imageTokens[parseInt(idx, 10)];
+        return original !== undefined ? original : `__IMG_${idx}__`;
       });
 
-      const processed =
-        response?.choices?.[0]?.message?.content;
-      if (typeof processed === 'string' && processed.trim()) {
-        return {
-          ...conversionResult,
-          markdown: processed,
-        };
-      }
+      return {
+        ...conversionResult,
+        markdown: processed,
+      };
     } catch (error) {
       console.error('MistralAI annotation post-processing error:', error);
       new Notice(
