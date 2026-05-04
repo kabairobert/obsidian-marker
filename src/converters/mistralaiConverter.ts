@@ -39,9 +39,11 @@ const ANNOTATION_LABELS_PROMPT = `
 ## Annotation Label System
 
 Prepend labels to sentences/paragraphs that match the trigger keywords. Format depends on intensity level:
-- lite:  [emoji]**[Word]:** (full word, bold)
-- full:  [emoji]**[Abbr]:** (abbreviated, bold)
-- ultra: [emoji][Abbr]: (no bold)
+- lite:  [emoji]**[Word]:** (full word, bold) — e.g. 📣**Claim:** or ✅**Answer:**
+- full:  [emoji]**[Abbr]:** (abbreviated, bold) — e.g. 📣**Clm:** or ✅**Ans:**
+- ultra: [emoji][Abbr]: (no bold) — e.g. 📣Clm: or ✅Ans:
+
+The opening ** must appear immediately after the emoji and the closing ** must appear immediately after the colon, like this: [emoji]**[Word/Abbr]:**
 
 Labels, abbreviations, and trigger keywords:
 ❓Q(uestion): question/ask/unclear
